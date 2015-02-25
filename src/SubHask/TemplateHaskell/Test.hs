@@ -20,11 +20,12 @@ import SubHask.TemplateHaskell.Deriving
 testMap :: Map.Map String [String]
 testMap = Map.fromList
     [ ( "Eq",[] )
-    , ( "InfSemilatice",[])
     , ( "MinBound",[])
     , ( "Lattice",[])
     , ( "Ord",[])
     , ( "POrd",[])
+
+    -- comparison
 
     , ( "Eq_",
         [ "law_Eq_reflexive"
@@ -43,7 +44,6 @@ testMap = Map.fromList
         [ "law_Lattice_infabsorption"
         , "law_Lattice_supabsorption"
         ] )
---     , ( "Ord_",[])
     , ( "Ord_",
         [ "law_Ord_totality"
         , "law_Ord_min"
@@ -76,7 +76,7 @@ testMap = Map.fromList
         , "law_Enum_toEnum"
         ] )
 
-
+    -- algebra
 
     , ( "Semigroup" ,
         [ "law_Semigroup_associativity"
@@ -119,39 +119,31 @@ testMap = Map.fromList
         , "law_Integral_toFromInverse"
         ])
 
+    -- sizes
+
     , ( "HasScalar", [] )
     , ( "Normed",
         [
         ] )
-    , ( "MetricSpace",
-        [ "law_MetricSpace_nonnegativity"
-        , "law_MetricSpace_indiscernables"
-        , "law_MetricSpace_symmetry"
-        , "law_MetricSpace_triangle"
+    , ( "Metric",
+        [ "law_Metric_nonnegativity"
+        , "law_Metric_indiscernables"
+        , "law_Metric_symmetry"
+        , "law_Metric_triangle"
         ] )
+
+    -- containers
 
     , ( "Container",
         [ "law_Container_preservation"
-        , "law_Constructible_singleton"
-        , "theorem_Constructible_insert"
         ] )
-    , ( "Indexed",
-        [ "law_Indexed_cons"
-        ] )
-
     , ( "Constructible",
-        [ "defn_Constructible_cons"
+        [ "law_Constructible_singleton"
+        , "defn_Constructible_cons"
         , "defn_Constructible_snoc"
         , "defn_Constructible_fromList"
         , "defn_Constructible_fromListN"
-        ] )
-    , ( "Unfoldable",
-        [
---         [ "law_Container_empty"
---         , "law_Container_MonoidMinBound"
---         , "law_Container_MonoidNormed"
---         , "defn_Container_infDisjoint"
---         , "defn_Container_null"
+        , "theorem_Constructible_cons"
         ] )
     , ( "Foldable",
         [
@@ -160,7 +152,22 @@ testMap = Map.fromList
         [ "law_Partitionable_length"
         , "law_Partitionable_monoid"
         ] )
-    , ( "FreeMonoid", [])
+
+    -- indexed containers
+
+    , ( "IxConstructible",
+        [ "law_IxConstructible_lookup"
+        , "defn_IxConstructible_consAt"
+        , "defn_IxConstructible_snocAt"
+        , "defn_IxConstructible_fromIxList"
+        ] )
+    , ( "IxContainer",
+        [ "law_IxContainer_preservation"
+        , "defn_IxContainer_bang"
+        , "defn_IxContainer_findWithDefault"
+        , "defn_IxContainer_hasIndex"
+        ] )
+
     ]
 
 -- | makes tests for all instances of a class that take no type variables

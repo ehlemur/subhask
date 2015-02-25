@@ -30,6 +30,7 @@ instance Eq_ Dec where (==) = (P.==)
 --------------------------------------------------------------------------------
 -- derive monad instances
 
+-- | Constructs an instance using the given function for everything in scope.
 deriveAllInScope :: Name -> (Cxt -> Type -> Q [Dec]) -> Q [Dec]
 deriveAllInScope preludename f = do
     info <- reify preludename
@@ -93,10 +94,10 @@ mkPreludeMonad cxt t = validType t $ M.return
         )
         [ FunD ( mkName "return_" ) [ Clause [] (NormalB $ VarE $ mkName "M.return") [] ]
         , FunD ( mkName "join"    ) [ Clause [] (NormalB $ VarE $ mkName "M.join"  ) [] ]
-        , FunD ( mkName ">>="     ) [ Clause [] (NormalB $ VarE $ mkName ">>="     ) [] ]
-        , FunD ( mkName ">=>"     ) [ Clause [] (NormalB $ VarE $ mkName ">=>"     ) [] ]
-        , FunD ( mkName "=<<"     ) [ Clause [] (NormalB $ VarE $ mkName "=<<"     ) [] ]
-        , FunD ( mkName "<=<"     ) [ Clause [] (NormalB $ VarE $ mkName "<=<"     ) [] ]
+        , FunD ( mkName ">>="     ) [ Clause [] (NormalB $ VarE $ mkName "M.>>="   ) [] ]
+        , FunD ( mkName ">=>"     ) [ Clause [] (NormalB $ VarE $ mkName "M.>=>"   ) [] ]
+        , FunD ( mkName "=<<"     ) [ Clause [] (NormalB $ VarE $ mkName "M.=<<"   ) [] ]
+        , FunD ( mkName "<=<"     ) [ Clause [] (NormalB $ VarE $ mkName "M.<=<"   ) [] ]
         ]
     ]
     where
