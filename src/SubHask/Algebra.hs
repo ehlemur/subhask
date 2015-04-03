@@ -1,5 +1,5 @@
 {-# LANGUAGE CPP,MagicHash,UnboxedTuples #-}
-{-# LANGUAGE IncoherentInstances #-}
+-- {-# LANGUAGE IncoherentInstances #-}
 
 -- | This module defines the algebraic type-classes used in subhask.
 -- The class hierarchies are significantly more general than those in the standard Prelude.
@@ -111,6 +111,17 @@ module SubHask.Algebra
     , isEmpty
 
     , Foldable (..)
+    , law_Foldable_sum
+    , theorem_Foldable_tofrom
+    , defn_Foldable_foldr
+    , defn_Foldable_foldr'
+    , defn_Foldable_foldl
+    , defn_Foldable_foldl'
+    , defn_Foldable_foldr1
+    , defn_Foldable_foldr1'
+    , defn_Foldable_foldl1
+    , defn_Foldable_foldl1'
+
     , foldtree1
     , length
     , reduce
@@ -136,6 +147,7 @@ module SubHask.Algebra
     , defn_IxConstructible_consAt
     , defn_IxConstructible_snocAt
     , defn_IxConstructible_fromIxList
+    , insertAt
 
     -- * Maybe
     , CanError (..)
@@ -146,9 +158,16 @@ module SubHask.Algebra
     -- ** Classes with one operator
     , Semigroup (..)
     , law_Semigroup_associativity
+    , defn_Semigroup_plusequal
+    , Actor
+    , Action (..)
+    , law_Action_compatibility
+    , defn_Action_dotplusequal
+    , (+.)
     , Cancellative (..)
     , law_Cancellative_rightminus1
     , law_Cancellative_rightminus2
+    , defn_Cancellative_plusequal
     , Monoid (..)
     , law_Monoid_leftid
     , law_Monoid_rightid
@@ -167,6 +186,7 @@ module SubHask.Algebra
     , law_Rg_annihilation
     , law_Rg_distributivityLeft
     , theorem_Rg_distributivityRight
+    , defn_Rg_timesequal
     , Rig(..)
     , law_Rig_multiplicativeId
     , Rng
@@ -178,6 +198,7 @@ module SubHask.Algebra
     , law_Integral_toFromInverse
     , fromIntegral
     , Field(..)
+    , OrdField(..)
     , RationalField(..)
     , convertRationalField
     , toFloat
@@ -205,7 +226,7 @@ module SubHask.Algebra
     , HasScalar
     , Cone (..)
     , Module (..)
-    , (.*)
+    , (*.)
     , VectorSpace (..)
     , Banach (..)
     , Hilbert (..)
@@ -213,6 +234,9 @@ module SubHask.Algebra
     , innerProductNorm
     , OuterProductSpace (..)
 
+    -- * Helper functions
+    , simpleMutableDefn
+    , module SubHask.Mutable
     )
     where
 
@@ -236,7 +260,26 @@ import GHC.Magic
 
 import SubHask.Internal.Prelude
 import SubHask.Category
+import SubHask.Mutable
 import SubHask.SubType
+
+
+-------------------------------------------------------------------------------
+-- Helper functions
+
+-- | Creates a quickcheck property for a simple mutable operator defined using "immutable2mutable"
+simpleMutableDefn :: Eq_ a
+    => (Mutable (ST s) a -> b -> ST s ()) -- ^ mutable function
+    -> (a -> b -> a)              -- ^ create a mutable function using "immutable2mutable"
+    -> (a -> b -> Logic a)        -- ^ the output property
+simpleMutableDefn mf f a b = unsafeRunMutableProperty $ do
+    ma1 <- thaw a
+    ma2 <- thaw a
+    mf ma1 b
+    immutable2mutable f ma2 b
+    a1 <- freeze ma1
+    a2 <- freeze ma2
+    return $ a1==a2
 
 -------------------------------------------------------------------------------
 -- relational classes
@@ -784,55 +827,21 @@ class Semigroup g where
     infixl 6 +
     (+) :: g -> g -> g
 
-    sgErrorBound :: HasScalar g => g -> Scalar g
-    sgErrorBound = 0
-
--- law_Semigroup_associativity ::
---     ( HasScalar g
---     , Semigroup g
---     , Metric g
---     ) => g -> g -> g -> Bool
--- law_Semigroup_associativity g1 g2 g3 = associator g1 g2 g3 <= sgErrorBound g1
-
-associator :: (Semigroup g, Metric g) => g -> g -> g -> Scalar g
-associator g1 g2 g3 = distance ((g1+g2)+g3) (g1+(g2+g3))
-
--- normedAssociator g1 g2 g3
---     = abs $ 1 - (toRational_ $ size ((g1+g2)+g3))
---               / (toRational_ $ size (g1+(g2+g3)))
-
-toRational_ :: (a <: Rational) => a -> Rational
-toRational_ = embedType
+    infixr 5 +=
+    (+=) :: PrimMonad m => Mutable m g -> g -> m ()
+    (+=) = immutable2mutable (+)
 
 law_Semigroup_associativity :: (Eq g, Semigroup g ) => g -> g -> g -> Logic g
 law_Semigroup_associativity g1 g2 g3 = g1 + (g2 + g3) == (g1 + g2) + g3
 
--- theorem_Semigroup_associativity ::
---     ( Ring (Scalar g)
---     , Eq (Scalar g)
---     , Eq g
---     , Semigroup g
---     ) => g -> g -> g -> Bool
--- theorem_Semigroup_associativity g1 g2 g3 = if associativeEpsilon g1==0
---     then g1 + (g2 + g3) == (g1 + g2) + g3
---     else True
---
--- law_Semigroup_epsilonAssociativity ::
---     ( Semigroup g
---     , Normed g
---     , Field (Scalar g)
---     ) => g -> g -> g -> Bool
--- law_Semigroup_epsilonAssociativity g1 g2 g3
---     = relativeSemigroupError g1 g2 g3 < associativeEpsilon g1
+defn_Semigroup_plusequal :: (Eq_ g, Semigroup g) => g -> g -> Logic g
+defn_Semigroup_plusequal = simpleMutableDefn (+=) (+)
 
-relativeSemigroupError ::
-    ( Semigroup g
-    , Normed g
-    , Field (Scalar g)
-    ) => g -> g -> g -> Scalar g
-relativeSemigroupError g1 g2 g3
-    = size (   g1 + ( g2    + g3 ) )
-    / size ( ( g1 +   g2  ) + g3   )
+-- | Measures the degree to which a Semigroup obeys the associative law.
+--
+-- FIXME: Less-than-perfect associativity should be formalized in the class laws somehow.
+associator :: (Semigroup g, Metric g) => g -> g -> g -> Scalar g
+associator g1 g2 g3 = distance ((g1+g2)+g3) (g1+(g2+g3))
 
 -- | A generalization of 'Data.List.cycle' to an arbitrary 'Semigroup'.
 -- May fail to terminate for some values in some semigroups.
@@ -852,10 +861,62 @@ instance Semigroup   b => Semigroup   (a -> b) where f+g = \a -> f a + g a
 
 ---------------------------------------
 
+-- | This type class is only used by the "Action" class.
+-- It represents the semigroup that acts on our type.
+type family Actor s
+
+-- | Semigroup actions let us apply a semigroup to a set.
+-- The theory of Modules is essentially the theory of Ring actions.
+-- (See <http://mathoverflow.net/questions/100565/why-are-ring-actions-much-harder-to-find-than-group-actions mathoverflow.)
+-- That is why the two classes use similar notation.
+--
+-- See <https://en.wikipedia.org/wiki/Semigroup_action wikipedia> for more detail.
+--
+-- FIXME: These types could probably use a more expressive name.
+--
+-- FIXME: We would like every Semigroup to act on itself, but this results in a class cycle.
+class Semigroup (Actor s) => Action s where
+    infixl 6 .+
+    (.+) :: s -> Actor s -> s
+
+    infixr 5 .+=
+    (.+=) :: PrimMonad m => Mutable m s -> Actor s -> m ()
+    (.+=) = immutable2mutable (.+)
+
+law_Action_compatibility :: (Eq_ s, Action s) => Actor s -> Actor s -> s -> Logic s
+law_Action_compatibility a1 a2 s = (a1+a2) +. s == a1 +. a2 +. s
+
+defn_Action_dotplusequal :: (Eq_ s, Action s, Logic (Actor s)~Logic s) => s -> Actor s -> Logic s
+defn_Action_dotplusequal = simpleMutableDefn (.+=) (.+)
+
+-- | > s .+ a = a +. s
+infixr 6 +.
+(+.) :: Action s => Actor s -> s -> s
+a +. s = s .+ a
+
+type instance Actor Int      = Int
+type instance Actor Integer  = Integer
+type instance Actor Float    = Float
+type instance Actor Double   = Double
+type instance Actor Rational = Rational
+type instance Actor ()       = ()
+type instance Actor (a->b)   = a->Actor b
+
+instance Action Int      where (.+) = (+)
+instance Action Integer  where (.+) = (+)
+instance Action Float    where (.+) = (+)
+instance Action Double   where (.+) = (+)
+instance Action Rational where (.+) = (+)
+instance Action ()       where (.+) = (+)
+
+instance Action b => Action (a->b) where f.+g = \x -> f x.+g x
+
+---------------------------------------
+
 class Semigroup g => Monoid g where
     zero :: g
 
--- | FIXME: this should be in the Monoid class
+-- | FIXME: this should be in the Monoid class, but putting it there requires a lot of changes to Eq
 isZero :: (Monoid g, ValidEq g) => g -> Logic g
 isZero = (==zero)
 
@@ -876,20 +937,6 @@ instance Monoid Integer   where zero = 0
 instance Monoid Float     where zero = 0
 instance Monoid Double    where zero = 0
 instance Monoid Rational  where zero = 0
-
-type instance Logic (Maybe a) = Logic a
-
-instance ValidEq a => Eq_ (Maybe a) where
-    Nothing   == Nothing   = true
-    Nothing   == _         = false
-    _         == Nothing   = false
-    (Just a1) == (Just a2) = a1==a2
-
-instance Semigroup a => Monoid (Maybe a) where
-    zero = Nothing
-
-instance Semigroup a => Monoid (Maybe' a) where
-    zero = Nothing'
 
 instance Monoid () where
     zero = ()
@@ -921,11 +968,19 @@ class Semigroup g => Cancellative g where
     infixl 6 -
     (-) :: g -> g -> g
 
+    infixr 5 -=
+    (-=) :: PrimMonad m => Mutable m g -> g -> m ()
+    (-=) = immutable2mutable (-)
+
+
 law_Cancellative_rightminus1 :: (Eq g, Cancellative g) => g -> g -> Bool
 law_Cancellative_rightminus1 g1 g2 = (g1 + g2) - g2 == g1
 
 law_Cancellative_rightminus2 :: (Eq g, Cancellative g) => g -> g -> Bool
 law_Cancellative_rightminus2 g1 g2 = g1 + (g2 - g2) == g1
+
+defn_Cancellative_plusequal :: (Eq_ g, Cancellative g) => g -> g -> Logic g
+defn_Cancellative_plusequal = simpleMutableDefn (-=) (-)
 
 instance Cancellative Int        where (-) = (P.-)
 instance Cancellative Integer    where (-) = (P.-)
@@ -938,14 +993,6 @@ instance Cancellative () where
 
 instance Cancellative b => Cancellative (a -> b) where
     f-g = \a -> f a - g a
-
--- | The GrothendieckGroup is a general way to construct groups from cancellative semigroups.
---
--- FIXME: How should this be related to the Ratio type?
---
--- See <http://en.wikipedia.org/wiki/Grothendieck_group wikipedia> for more details.
-data GrothendieckGroup g where
-    GrotheindieckGroup :: Cancellative g => g -> GrothendieckGroup g
 
 ---------------------------------------
 
@@ -1007,6 +1054,10 @@ class (Abelian r, Monoid r) => Rg r where
     infixl 7 *
     (*) :: r -> r -> r
 
+    infixr 5 *=
+    (*=) :: PrimMonad m => Mutable m r -> r -> m ()
+    (*=) = immutable2mutable (*)
+
 law_Rg_multiplicativeAssociativity :: (Eq r, Rg r) => r -> r -> r -> Bool
 law_Rg_multiplicativeAssociativity r1 r2 r3 = (r1 * r2) * r3 == r1 * (r2 * r3)
 
@@ -1021,6 +1072,9 @@ law_Rg_distributivityLeft r1 r2 r3 = r1*(r2+r3) == r1*r2+r1*r3
 
 theorem_Rg_distributivityRight :: (Eq r, Rg r) => r -> r -> r -> Bool
 theorem_Rg_distributivityRight r1 r2 r3 = (r2+r3)*r1 == r2*r1+r3*r1
+
+defn_Rg_timesequal :: (Eq_ g, Rg g) => g -> g -> Logic g
+defn_Rg_timesequal = simpleMutableDefn (*=) (*)
 
 instance Rg Int         where (*) = (P.*)
 instance Rg Integer     where (*) = (P.*)
@@ -1189,6 +1243,10 @@ class Ring r => Field r where
     (/) :: r -> r -> r
     n/d = n * reciprocal d
 
+--     infixr 5 /=
+--     (/=) :: PrimMonad m => Mutable m g -> g -> m ()
+--     (/=) = immutable2mutable (/)
+
     {-# INLINE fromRational #-}
     fromRational :: Rational -> r
     fromRational r = fromInteger (numerator r) / fromInteger (denominator r)
@@ -1202,7 +1260,43 @@ instance Field b => Field (a -> b) where reciprocal f = reciprocal . f
 
 ----------------------------------------
 
+-- | Ordered fields are generalizations of the rational numbers that maintain most of the nice properties.
+-- In particular, all finite fields and the complex numbers are NOT ordered fields.
+--
+-- See <http://en.wikipedia.org/wiki/Ordered_field wikipedia> for more details.
+class (Field r, Ord r, Normed r, IsScalar r) => OrdField r
+
+instance OrdField Float
+instance OrdField Double
+instance OrdField Rational
+
+---------------------------------------
+
+-- | The prototypical example of a bounded field is the extended real numbers.
+-- Other examples are the extended hyperreal numbers and the extended rationals.
+-- Each of these fields has been extensively studied, but I don't know of any studies of this particular abstraction of these fields.
+--
+-- See <https://en.wikipedia.org/wiki/Extended_real_number_line wikipedia> for more details.
+class (OrdField r, Bounded r) => BoundedField r where
+    nan :: r
+    nan = 0/0
+
+    isNaN :: r -> Bool
+
+infinity :: BoundedField r => r
+infinity = maxBound
+
+negInfinity :: BoundedField r => r
+negInfinity = minBound
+
+instance BoundedField Float  where isNaN = P.isNaN
+instance BoundedField Double where isNaN = P.isNaN
+
+----------------------------------------
+
 -- | A Rational field is a field with only a single dimension.
+--
+-- FIXME: this isn't part of standard math; why is it here?
 class Field r => RationalField r where
     toRational :: r -> Rational
 
@@ -1222,28 +1316,6 @@ toFloat = convertRationalField
 
 toDouble :: RationalField a => a -> Double
 toDouble = convertRationalField
-
----------------------------------------
-
--- | The prototypical example of a bounded field is the extended real numbers.
--- Other examples are the extended hyperreal numbers and the extended rationals.
--- Each of these fields has been extensively studied, but I don't know of any studies of this particular abstraction of these fields.
---
--- See <https://en.wikipedia.org/wiki/Extended_real_number_line wikipedia> for more details.
-class (Field r, Bounded r) => BoundedField r where
-    nan :: r
-    nan = 0/0
-
-    isNaN :: r -> Bool
-
-infinity :: BoundedField r => r
-infinity = maxBound
-
-negInfinity :: BoundedField r => r
-negInfinity = minBound
-
-instance BoundedField Float  where isNaN = P.isNaN
-instance BoundedField Double where isNaN = P.isNaN
 
 ---------------------------------------
 
@@ -1330,8 +1402,8 @@ instance Floating Double where
 type family Scalar m
 
 -- FIXME: made into classes due to TH limitations
-class (Ring r, Ord_ r, Scalar r~r, Normed r) => IsScalar r
-instance (Ring r, Ord_ r, Scalar r~r, Normed r) => IsScalar r
+class (Ring r, Ord_ r, Scalar r~r, Normed r, ClassicalLogic r) => IsScalar r
+instance (Ring r, Ord_ r, Scalar r~r, Normed r, ClassicalLogic r) => IsScalar r
 
 -- FIXME: made into classes due to TH limitations
 class (IsScalar (Scalar a)) => HasScalar a
@@ -1361,7 +1433,7 @@ class
     ) => Normed g where
     size :: g -> Scalar g
 
-abs :: (Ring g, Normed g) => g -> Scalar g
+abs :: IsScalar g => g -> g
 abs = size
 
 instance Normed Int       where size = P.abs
@@ -1397,26 +1469,34 @@ class (Cancellative m, HasScalar m, Rig (Scalar m)) => Cone m where
 
 ---------------------------------------
 
-class (Abelian m, Group m, HasScalar m) => Module m where
-    infixl 7 *.
-    (*.) :: Scalar m -> m -> m
+class (Abelian v, Group v, HasScalar v) => Module v where
+    infixl 7 .*
+    (.*) :: v -> Scalar v -> v
 
     infixl 7 .*.
-    (.*.) :: m -> m -> m
+    (.*.) :: v -> v -> v
 
-{-# INLINE (.*) #-}
-infixl 7 .*
-(.*) :: Module m => m -> Scalar m -> m
-m .* r  = r *. m
+    infixr 5 .*=
+    (.*=) :: PrimMonad m => Mutable m v -> Scalar v -> m ()
+    (.*=) = immutable2mutable (.*)
 
-instance Module Int       where (*.) = (*); (.*.) = (*)
-instance Module Integer   where (*.) = (*); (.*.) = (*)
-instance Module Float     where (*.) = (*); (.*.) = (*)
-instance Module Double    where (*.) = (*); (.*.) = (*)
-instance Module Rational  where (*.) = (*); (.*.) = (*)
+    infixr 5 .*.=
+    (.*.=) :: PrimMonad m => Mutable m v -> v -> m ()
+    (.*.=) = immutable2mutable (.*.)
 
-instance Module      b => Module      (a -> b) where
-    b  *. f = \a -> b    *. f a
+{-# INLINE (*.) #-}
+infixl 7 *.
+(*.) :: Module v => Scalar v -> v -> v
+r *. v  = v .* r
+
+instance Module Int       where (.*) = (*); (.*.) = (*)
+instance Module Integer   where (.*) = (*); (.*.) = (*)
+instance Module Float     where (.*) = (*); (.*.) = (*)
+instance Module Double    where (.*) = (*); (.*.) = (*)
+instance Module Rational  where (.*) = (*); (.*.) = (*)
+
+instance Module b => Module (a -> b) where
+    f .*  b = \a -> f a .*  b
     g .*. f = \a -> g a .*. f a
 
 ---------------------------------------
@@ -1739,38 +1819,56 @@ law_Constructible_singleton s e = elem e $ singleton e `asTypeOf` s
 theorem_Constructible_cons :: Container s => s -> Elem s -> Logic s
 theorem_Constructible_cons s e = elem e (cons e s)
 
--- | Provides inverse operations for "Unfoldable".
-class (Constructible s, Monoid s) => Foldable s where
 
-    {-# INLINE toList #-}
+-- | The dual of a monoid, obtained by swapping the arguments of 'mappend'.
+newtype DualSG a = DualSG { getDualSG :: a }
+        deriving (Read,Show)
+
+instance Semigroup a => Semigroup (DualSG a) where
+    (DualSG x)+(DualSG y) = DualSG (x+y)
+
+instance Monoid a => Monoid (DualSG a) where
+    zero = DualSG zero
+
+-- | The monoid of endomorphisms under composition.
+newtype Endo a = Endo { appEndo :: a -> a }
+
+instance Semigroup (Endo a) where
+    (Endo f)+(Endo g) = Endo (f.g)
+
+instance Monoid (Endo a) where
+    zero = Endo id
+
+-- | Provides inverse operations for "Constructible".
+--
+-- FIXME:
+-- should this class be broken up into smaller pieces?
+class (Constructible s, Monoid s, Normed s) => Foldable s where
+
+    {-# MINIMAL foldMap | foldr #-}
+
+    -- | Convert the container into a list.
     toList :: Foldable s => s -> [Elem s]
     toList s = foldr (:) [] s
 
     -- | Remove an element from the left of the container.
     uncons :: s -> Maybe (Elem s,s)
+    uncons s = case toList s of
+        []     -> Nothing
+        (x:xs) -> Just (x,fromList xs)
 
     -- | Remove an element from the right of the container.
     unsnoc :: s -> Maybe (s,Elem s)
+    unsnoc s = case unsnoc (toList s) of
+        Nothing -> Nothing
+        Just (xs,x) -> Just (fromList xs,x)
 
-    foldMap :: Monoid a => (Elem s -> a) -> s -> a
-    foldr   :: (Elem s -> a -> a) -> a -> s -> a
-    foldr'  :: (Elem s -> a -> a) -> a -> s -> a
-    foldl   :: (a -> Elem s -> a) -> a -> s -> a
-    foldl'  :: (a -> Elem s -> a) -> a -> s -> a
-
-    foldr1  :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
-    foldr1  f s = foldr1  f (toList s)
-    foldr1' :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
-    foldr1' f s = foldr1' f (toList s)
-    foldl1  :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
-    foldl1  f s = foldl1  f (toList s)
-    foldl1' :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
-    foldl1' f s = foldl1' f (toList s)
-
-    -- | the default summation uses kahan summation
+    -- | Add all the elements of the container together.
+    {-# INLINABLE sum #-}
     sum :: Monoid (Elem s) => s -> Elem s
     sum xs = foldl' (+) zero $ toList xs
 
+    -- | the default summation uses kahan summation
 --     sum :: (Abelian (Elem s), Group (Elem s)) => s -> Elem s
 --     sum = snd . foldl' go (zero,zero)
 --         where
@@ -1778,6 +1876,132 @@ class (Constructible s, Monoid s) => Foldable s where
 --                 where
 --                     y = i-c
 --                     t' = t+y
+
+    -- the definitions below are copied from Data.Foldable
+
+    foldMap :: Monoid a => (Elem s -> a) -> s -> a
+    foldMap f = foldr ((+) . f) zero
+
+    foldr :: (Elem s -> a -> a) -> a -> s -> a
+    foldr f z t = appEndo (foldMap (Endo . f) t) z
+
+    foldr' :: (Elem s -> a -> a) -> a -> s -> a
+    foldr' f z0 xs = foldl f' id xs z0
+        where f' k x z = k $! f x z
+
+    foldl   :: (a -> Elem s -> a) -> a -> s -> a
+    foldl f z t = appEndo (getDualSG (foldMap (DualSG . Endo . flip f) t)) z
+
+    foldl'  :: (a -> Elem s -> a) -> a -> s -> a
+    foldl' f z0 xs = foldr f' id xs z0
+         where f' x k z = k $! f z x
+
+    -- the following definitions are simpler (IMO) than those in Data.Foldable
+
+    foldr1  :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
+    foldr1  f s = foldr1  f (toList s)
+
+    foldr1' :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
+    foldr1' f s = foldr1' f (toList s)
+
+    foldl1  :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
+    foldl1  f s = foldl1  f (toList s)
+
+    foldl1' :: (Elem s -> Elem s -> Elem s) -> s -> Elem s
+    foldl1' f s = foldl1' f (toList s)
+
+defn_Foldable_foldr ::
+    ( Eq_ a
+    , a~Elem s
+    , Logic a ~ Logic (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> Elem s -> s -> Logic (Elem s)
+defn_Foldable_foldr f a s = foldr f a s == foldr f a (toList s)
+
+defn_Foldable_foldr' ::
+    ( Eq_ a
+    , a~Elem s
+    , Logic a ~ Logic (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> Elem s -> s -> Logic (Elem s)
+defn_Foldable_foldr' f a s = foldr' f a s == foldr' f a (toList s)
+
+defn_Foldable_foldl ::
+    ( Eq_ a
+    , a~Elem s
+    , Logic a ~ Logic (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> Elem s -> s -> Logic (Elem s)
+defn_Foldable_foldl f a s = foldl f a s == foldl f a (toList s)
+
+defn_Foldable_foldl' ::
+    ( Eq_ a
+    , a~Elem s
+    , Logic a ~ Logic (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> Elem s -> s -> Logic (Elem s)
+defn_Foldable_foldl' f a s = foldl' f a s == foldl' f a (toList s)
+
+defn_Foldable_foldr1 ::
+    ( Eq_ (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> s -> Logic (Elem s)
+defn_Foldable_foldr1 f s = (length s > 0) ==> (foldr1 f s == foldr1 f (toList s))
+
+defn_Foldable_foldr1' ::
+    ( Eq_ (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> s -> Logic (Elem s)
+defn_Foldable_foldr1' f s = (length s > 0) ==> (foldr1' f s == foldr1' f (toList s))
+
+defn_Foldable_foldl1 ::
+    ( Eq_ (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> s -> Logic (Elem s)
+defn_Foldable_foldl1 f s = (length s > 0) ==> (foldl1 f s == foldl1 f (toList s))
+
+defn_Foldable_foldl1' ::
+    ( Eq_ (Elem s)
+    , Logic (Scalar s) ~ Logic (Elem s)
+    , Boolean (Logic (Elem s))
+    , Foldable s
+    ) => (Elem s -> Elem s -> Elem s) -> s -> Logic (Elem s)
+defn_Foldable_foldl1' f s = (length s > 0) ==> (foldl1' f s == foldl1' f (toList s))
+
+-- |
+--
+-- Note:
+-- The inverse \"theorem\" of @(toList . fromList) xs == xs@ is actually not true.
+-- See the "Set" type for a counter example.
+theorem_Foldable_tofrom :: (Eq_ s, Foldable s) => s -> Logic s
+theorem_Foldable_tofrom s = fromList (toList s) == s
+
+-- |
+-- FIXME:
+-- This law can't be automatically included in the current test system because it breaks parametricity by requiring @Monoid (Elem s)@
+law_Foldable_sum ::
+    ( Logic (Scalar s)~Logic s
+    , Logic (Elem s)~Logic s
+    , Heyting (Logic s)
+    , Monoid (Elem s)
+    , Eq_ (Elem s)
+    , Foldable s
+    ) => s -> s -> Logic s
+law_Foldable_sum s1 s2 = sizeDisjoint s1 s2 ==> (sum (s1+s2) == sum s1 + sum s2)
 
 -- | This fold is not in any of the standard libraries.
 foldtree1 :: Monoid a => [a] -> a
@@ -2084,6 +2308,8 @@ instance Constructible [a] where
     fromList1N _ x xs = x:xs
 
 instance Foldable [a] where
+    toList = id
+
     uncons [] = Nothing
     uncons (x:xs) = Just (x,xs)
 
@@ -2104,17 +2330,28 @@ instance Foldable [a] where
 
 ----------------------------------------
 
+type instance Scalar (Maybe a) = Scalar a
+type instance Logic (Maybe a) = Logic a
+
+instance ValidEq a => Eq_ (Maybe a) where
+    Nothing   == Nothing   = true
+    Nothing   == _         = false
+    _         == Nothing   = false
+    (Just a1) == (Just a2) = a1==a2
+
 instance Semigroup a => Semigroup (Maybe a) where
     (Just a1) + (Just a2) = Just $ a1+a2
     Nothing   + a2        = a2
     a1        + Nothing   = a1
 
+instance Semigroup a => Monoid (Maybe a) where
+    zero = Nothing
+
 ----------
 
-data Maybe' a
-    = Nothing'
-    | Just' !a
+data Maybe' a = Nothing' | Just' !a
 
+type instance Scalar (Maybe' a) = Scalar a
 type instance Logic (Maybe' a) = Logic a
 
 instance NFData a => NFData (Maybe' a) where
@@ -2130,6 +2367,9 @@ instance Semigroup a => Semigroup (Maybe' a) where
     (Just' a1) + (Just' a2) = Just' $ a1+a2
     Nothing'   + a2         = a2
     a1         + Nothing'   = a1
+
+instance Semigroup a => Monoid (Maybe' a) where
+    zero = Nothing'
 
 ----------------------------------------
 
@@ -2171,11 +2411,11 @@ instance (Logic a~Logic b, Abelian a, Abelian b) => Abelian (a,b)
 instance (Logic a~Logic b, Abelian a, Abelian b, Abelian c) => Abelian (a,b,c)
 
 instance (Logic a~Logic b, Module a, Module b, Scalar a ~ Scalar b) => Module (a,b) where
-    r *. (a,b) = (r*.a, r*.b)
+    (a,b) .* r = (r*.a, r*.b)
     (a1,b1).*.(a2,b2) = (a1.*.a2,b1.*.b2)
 
 instance (Logic a~Logic b, Module a, Module b, Module c, Scalar a ~ Scalar b, Scalar c~Scalar b) => Module (a,b,c) where
-    r *. (a,b,c) = (r*.a, r*.b,r*.c)
+    (a,b,c) .* r = (r*.a, r*.b,r*.c)
     (a1,b1,c1).*.(a2,b2,c2) = (a1.*.a2,b1.*.b2,c1.*.c2)
 
 instance (Logic a~Logic b, VectorSpace a,VectorSpace b, Scalar a ~ Scalar b) => VectorSpace (a,b) where
@@ -2189,7 +2429,7 @@ instance (Logic a~Logic b, VectorSpace a,VectorSpace b, VectorSpace c, Scalar a 
 --------------------------------------------------------------------------------
 
 data Labeled' x y = Labeled' { xLabeled' :: !x, yLabeled' :: !y }
-    deriving (Read,Show)
+    deriving (Read,Show,Typeable)
 
 instance (NFData x, NFData y) => NFData (Labeled' x y) where
     rnf (Labeled' x y) = deepseq x $ rnf y
@@ -2201,6 +2441,7 @@ instance (Arbitrary x, Arbitrary y) => Arbitrary (Labeled' x y) where
         return $ Labeled' x y
 
 type instance Scalar (Labeled' x y) = Scalar x
+type instance Actor (Labeled' x y) = x
 type instance Logic (Labeled' x y) = Logic x
 type instance Elem (Labeled' x y) = Elem x
 
@@ -2224,6 +2465,11 @@ instance (ClassicalLogic x, Ord_ x) => Lattice_ (Labeled' x y) where
     (Labeled' x1 _)>=(Labeled' x2 _) = x1>=x2
 
 instance (ClassicalLogic x, Ord_ x) => Ord_ (Labeled' x y) where
+
+-----
+
+instance Semigroup x => Action (Labeled' x y) where
+    (Labeled' x y) .+ x' = Labeled' (x'+x) y
 
 -----
 

@@ -60,6 +60,9 @@ main = defaultMain
 --             , $( mkSpecializedClassTests [t| JensenShannonDivergence Vector Double  |] [''Metric] )
 --             ]
 --         ]
+    , testGroup "objects"
+        [ $( mkSpecializedClassTests [t| Labeled' Int Int |] [ ''Action,''Ord,''Metric ] )
+        ]
     , testGroup "containers"
         [ $( mkSpecializedClassTests [t| []            Char |] [ ''Foldable,''MinBound,''Partitionable ] )
         , $( mkSpecializedClassTests [t| Array         Char |] [ ''Foldable,''MinBound,''Partitionable ] )
@@ -79,8 +82,16 @@ main = defaultMain
             , $( mkSpecializedClassTests [t| Levenshtein    [Char] |] [''Metric] )
             ]
         , testGroup "metric"
-            [ $( mkSpecializedClassTests [t| Box Int                    |] [''Eq,''Container] )
-            , $( mkSpecializedClassTests [t| Box (ComponentWise [Char]) |] [''Eq,''Container] )
+--             [ $( mkSpecializedClassTests [t| Ball Int                    |] [''Eq,''Container] )
+--             , $( mkSpecializedClassTests [t| Ball (Hamming [Char])       |] [''Eq,''Container] )
+            [ $( mkSpecializedClassTests [t| Box Int                     |] [''Eq,''Container] )
+            , $( mkSpecializedClassTests [t| Box (ComponentWise [Char])  |] [''Eq,''Container] )
             ]
         ]
     ]
+
+--------------------------------------------------------------------------------
+-- orphan instances needed for compilation
+
+instance (Show a, Show b) => Show (a -> b) where
+    show _ = "function"
